@@ -1,3 +1,79 @@
+export class UnsupportedCredentialProfileError extends Error {
+    code = 'unsupported_profile';
+    constructor() {
+        super('Credential profile is not supported');
+        this.name = 'UnsupportedCredentialProfileError';
+    }
+}
+export function resolveCredentialProfile(profile, adapters) {
+    if (!isRecord(profile) || typeof profile.schema !== 'string' || profile.schema.length === 0) {
+        throw new UnsupportedCredentialProfileError();
+    }
+    const adapter = adapters.find((candidate) => candidate.schema === profile.schema);
+    if (!adapter) {
+        throw new UnsupportedCredentialProfileError();
+    }
+    return adapter.validate(profile);
+}
+export function assertCredentialRequestBinding(request, expected) {
+    if (request.schema !== 'castalia.credential-request.v1' || request.schema_version !== 1) {
+        throw new Error('unsupported_version');
+    }
+    if (request.namespace !== expected.namespace ||
+        request.subject_public_key !== expected.subject_public_key ||
+        request.origin !== expected.origin ||
+        request.profile.schema !== expected.profile_schema) {
+        throw new Error('request_binding_mismatch');
+    }
+    if (!request.request_id ||
+        !request.nonce ||
+        !request.wallet_signature ||
+        !request.requested_at ||
+        !request.request_expires_at) {
+        throw new Error('invalid_request');
+    }
+    const requestedAt = Date.parse(request.requested_at);
+    const expiresAt = Date.parse(request.request_expires_at);
+    const now = (expected.now ? expected.now() : new Date()).getTime();
+    if (!Number.isFinite(requestedAt) || !Number.isFinite(expiresAt) || requestedAt >= expiresAt) {
+        throw new Error('invalid_request');
+    }
+    if (now >= expiresAt) {
+        throw new Error('credential_request_expired');
+    }
+}
+export async function requestCredentialWithCastaliaWallet(input) {
+    if (!(await input.provider.isAvailable())) {
+        throw new Error('Castalia Wallet provider is not available');
+    }
+    return input.provider.requestCredential({
+        namespace: input.namespace,
+        profile: input.profile,
+        request_expires_at: input.request_expires_at,
+        nonce: input.nonce,
+    });
+}
+export async function useCredentialWithCastaliaWallet(input) {
+    if (!(await input.provider.isAvailable())) {
+        return {
+            schema: 'castalia.credential-use-result.v1',
+            schema_version: 1,
+            state: 'unavailable',
+            reason: 'provider_unavailable',
+        };
+    }
+    const result = await input.provider.useCredential(input.request);
+    if (result.state === 'approved' && (!result.credential || !result.expires_at)) {
+        throw new Error('invalid_credential_use_result');
+    }
+    if (result.state !== 'approved' && result.credential !== undefined) {
+        throw new Error('invalid_credential_use_result');
+    }
+    return result;
+}
+function isRecord(value) {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 export function createWalletAuthChallenge(input) {
     const now = input.now ? input.now() : new Date();
     const ttlMs = input.ttlMs ?? 300_000;

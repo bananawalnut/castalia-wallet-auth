@@ -32,6 +32,195 @@ export type CastaliaWalletProvider = {
   signChallenge(input: CastaliaWalletChallenge): Promise<CastaliaWalletSignaturePresentation>
 }
 
+export type JsonPrimitive = string | number | boolean | null
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
+
+export type CastaliaCredentialProfile = {
+  schema: string
+  [key: string]: JsonValue
+}
+
+export type CastaliaCredentialRequestV1 = {
+  schema: 'castalia.credential-request.v1'
+  schema_version: 1
+  request_id: string
+  namespace: string
+  subject_public_key: string
+  origin: string
+  profile: CastaliaCredentialProfile
+  requested_at: string
+  request_expires_at: string
+  nonce: string
+  wallet_signature: string
+}
+
+export type CastaliaCredentialInstallV1 = {
+  schema: 'castalia.credential-install.v1'
+  schema_version: 1
+  namespace: string
+  recipient_public_key: string
+  manifest: CastaliaCredentialProfile
+  encrypted_secret: string
+  issuer_signature: string
+}
+
+export type CastaliaCredentialUseV1 = {
+  schema: 'castalia.credential-use.v1'
+  schema_version: 1
+  namespace: string
+  audience: string
+  resource: string
+  method: 'GET' | 'POST'
+  path: string
+  required_scopes: string[]
+  reason: string
+}
+
+export type CastaliaCredentialUseResultV1 = {
+  schema: 'castalia.credential-use-result.v1'
+  schema_version: 1
+  state: 'approved' | 'denied' | 'unavailable'
+  credential?: string
+  credential_id?: string
+  version?: number
+  expires_at?: string
+  reason?: string
+}
+
+export type CastaliaCredentialInstallResultV1 = {
+  schema: 'castalia.credential-install-result.v1'
+  schema_version: 1
+  state: 'installed' | 'rejected' | 'unsupported'
+  namespace: string
+  credential_id?: string
+  version?: number
+  reason?: string
+}
+
+export type CastaliaCredentialProvider = CastaliaWalletProvider & {
+  requestCredential(input: {
+    namespace: string
+    profile: CastaliaCredentialProfile
+    request_expires_at: string
+    nonce: string
+  }): Promise<CastaliaCredentialRequestV1>
+  installCredential(input: CastaliaCredentialInstallV1): Promise<CastaliaCredentialInstallResultV1>
+  useCredential(input: CastaliaCredentialUseV1): Promise<CastaliaCredentialUseResultV1>
+}
+
+export type CastaliaCredentialProfileAdapter<TProfile extends CastaliaCredentialProfile> = {
+  readonly schema: TProfile['schema']
+  validate(profile: CastaliaCredentialProfile): TProfile
+}
+
+export class UnsupportedCredentialProfileError extends Error {
+  readonly code = 'unsupported_profile'
+
+  constructor() {
+    super('Credential profile is not supported')
+    this.name = 'UnsupportedCredentialProfileError'
+  }
+}
+
+export function resolveCredentialProfile<TProfile extends CastaliaCredentialProfile>(
+  profile: CastaliaCredentialProfile,
+  adapters: ReadonlyArray<CastaliaCredentialProfileAdapter<TProfile>>,
+): TProfile {
+  if (!isRecord(profile) || typeof profile.schema !== 'string' || profile.schema.length === 0) {
+    throw new UnsupportedCredentialProfileError()
+  }
+  const adapter = adapters.find((candidate) => candidate.schema === profile.schema)
+  if (!adapter) {
+    throw new UnsupportedCredentialProfileError()
+  }
+  return adapter.validate(profile)
+}
+
+export function assertCredentialRequestBinding(
+  request: CastaliaCredentialRequestV1,
+  expected: {
+    namespace: string
+    subject_public_key: string
+    origin: string
+    profile_schema: string
+    now?: () => Date
+  },
+): void {
+  if (request.schema !== 'castalia.credential-request.v1' || request.schema_version !== 1) {
+    throw new Error('unsupported_version')
+  }
+  if (
+    request.namespace !== expected.namespace ||
+    request.subject_public_key !== expected.subject_public_key ||
+    request.origin !== expected.origin ||
+    request.profile.schema !== expected.profile_schema
+  ) {
+    throw new Error('request_binding_mismatch')
+  }
+  if (
+    !request.request_id ||
+    !request.nonce ||
+    !request.wallet_signature ||
+    !request.requested_at ||
+    !request.request_expires_at
+  ) {
+    throw new Error('invalid_request')
+  }
+  const requestedAt = Date.parse(request.requested_at)
+  const expiresAt = Date.parse(request.request_expires_at)
+  const now = (expected.now ? expected.now() : new Date()).getTime()
+  if (!Number.isFinite(requestedAt) || !Number.isFinite(expiresAt) || requestedAt >= expiresAt) {
+    throw new Error('invalid_request')
+  }
+  if (now >= expiresAt) {
+    throw new Error('credential_request_expired')
+  }
+}
+
+export async function requestCredentialWithCastaliaWallet(input: {
+  provider: CastaliaCredentialProvider
+  namespace: string
+  profile: CastaliaCredentialProfile
+  request_expires_at: string
+  nonce: string
+}): Promise<CastaliaCredentialRequestV1> {
+  if (!(await input.provider.isAvailable())) {
+    throw new Error('Castalia Wallet provider is not available')
+  }
+  return input.provider.requestCredential({
+    namespace: input.namespace,
+    profile: input.profile,
+    request_expires_at: input.request_expires_at,
+    nonce: input.nonce,
+  })
+}
+
+export async function useCredentialWithCastaliaWallet(input: {
+  provider: CastaliaCredentialProvider
+  request: CastaliaCredentialUseV1
+}): Promise<CastaliaCredentialUseResultV1> {
+  if (!(await input.provider.isAvailable())) {
+    return {
+      schema: 'castalia.credential-use-result.v1',
+      schema_version: 1,
+      state: 'unavailable',
+      reason: 'provider_unavailable',
+    }
+  }
+  const result = await input.provider.useCredential(input.request)
+  if (result.state === 'approved' && (!result.credential || !result.expires_at)) {
+    throw new Error('invalid_credential_use_result')
+  }
+  if (result.state !== 'approved' && result.credential !== undefined) {
+    throw new Error('invalid_credential_use_result')
+  }
+  return result
+}
+
+function isRecord(value: unknown): value is Record<string, JsonValue> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 export type CreateWalletAuthChallengeInput = {
   nonce: string
   origin: string
@@ -163,4 +352,3 @@ function assertChallengeMatches(actual: CastaliaWalletChallenge, expected: Casta
     }
   }
 }
-
