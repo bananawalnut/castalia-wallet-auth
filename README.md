@@ -31,3 +31,5 @@ const verified = await authenticateWithCastaliaWallet({
 The provider must be supplied by the wallet implementation, for example a browser extension bridge. `verifyWalletPresentation` rejects expired challenges before delegating to the caller-supplied signature verifier.
 
 The additive credential API exposes generic request, install, and use envelopes without assigning meaning to product-owned profile fields. A Wallet implementation installs explicit profile adapters and must return `unsupported_profile` for every unknown schema or version. Existing challenge authentication remains unchanged. Approved use material is returned only for a bounded method, path, audience, resource, and scope request; callers must retain it in memory only.
+
+Credential helpers validate the generic envelope and dispatch profile validation to the supplied adapter. They do not verify wallet signatures, authorize product operations, or replace receiver-side expiry and policy checks. Unknown result versions and malformed authority values are rejected.

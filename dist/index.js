@@ -16,6 +16,9 @@ export function resolveCredentialProfile(profile, adapters) {
     return adapter.validate(profile);
 }
 export function assertCredentialRequestBinding(request, expected) {
+    if (!isRecord(request) || !isRecord(request.profile)) {
+        throw new Error('invalid_request');
+    }
     if (request.schema !== 'castalia.credential-request.v1' || request.schema_version !== 1) {
         throw new Error('unsupported_version');
     }
@@ -25,17 +28,14 @@ export function assertCredentialRequestBinding(request, expected) {
         request.profile.schema !== expected.profile_schema) {
         throw new Error('request_binding_mismatch');
     }
-    if (!request.request_id ||
-        !request.nonce ||
-        !request.wallet_signature ||
-        !request.requested_at ||
-        !request.request_expires_at) {
+    if (![request.request_id, request.nonce, request.wallet_signature, request.requested_at, request.request_expires_at]
+        .every((value) => typeof value === 'string' && value.trim().length > 0)) {
         throw new Error('invalid_request');
     }
     const requestedAt = Date.parse(request.requested_at);
     const expiresAt = Date.parse(request.request_expires_at);
     const now = (expected.now ? expected.now() : new Date()).getTime();
-    if (!Number.isFinite(requestedAt) || !Number.isFinite(expiresAt) || requestedAt >= expiresAt) {
+    if (!Number.isFinite(now) || !Number.isFinite(requestedAt) || !Number.isFinite(expiresAt) || requestedAt >= expiresAt) {
         throw new Error('invalid_request');
     }
     if (now >= expiresAt) {
@@ -63,7 +63,12 @@ export async function useCredentialWithCastaliaWallet(input) {
         };
     }
     const result = await input.provider.useCredential(input.request);
-    if (result.state === 'approved' && (!result.credential || !result.expires_at)) {
+    if (!isRecord(result) || result.schema !== 'castalia.credential-use-result.v1' || result.schema_version !== 1 ||
+        !['approved', 'denied', 'unavailable'].includes(result.state)) {
+        throw new Error('invalid_credential_use_result');
+    }
+    if (result.state === 'approved' && (typeof result.credential !== 'string' || result.credential.trim().length === 0 ||
+        typeof result.expires_at !== 'string' || !Number.isFinite(Date.parse(result.expires_at)))) {
         throw new Error('invalid_credential_use_result');
     }
     if (result.state !== 'approved' && result.credential !== undefined) {

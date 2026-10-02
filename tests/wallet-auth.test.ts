@@ -317,3 +317,49 @@ test('credential use rejects secret material on denied results', async () => {
     /invalid_credential_use_result/,
   )
 })
+
+
+test('credential use rejects malformed or unsupported provider results', async () => {
+  const approved = {
+    schema: 'castalia.credential-use-result.v1', schema_version: 1,
+    state: 'approved', credential: 'synthetic-test-authority',
+    expires_at: '2026-10-01T00:05:00.000Z',
+  }
+  const invalid = [
+    null, { ...approved, schema: 'future.result.v2' },
+    { ...approved, schema_version: 2 }, { ...approved, state: 'unknown', credential: undefined },
+    { ...approved, expires_at: 'invalid' }, { ...approved, credential: 42 },
+    { ...approved, credential: '   ' },
+  ]
+  for (const result of invalid) {
+    const provider = {
+      async isAvailable() { return true },
+      async useCredential() { return result },
+    } as unknown as CastaliaCredentialProvider
+    await assert.rejects(() => useCredentialWithCastaliaWallet({
+      provider,
+      request: {
+        schema: 'castalia.credential-use.v1', schema_version: 1,
+        namespace: 'zenith:devgraph', audience: 'devgraph',
+        resource: 'https://work.zenith-research.ca/devgraph', method: 'GET',
+        path: '/devgraph/graph', required_scopes: ['devgraph.graph.read'], reason: 'Read graph',
+      },
+    }), /invalid_credential_use_result/)
+  }
+})
+
+test('credential request binding rejects malformed fields and invalid clocks', () => {
+  const expected = {
+    namespace: 'zenith:devgraph', subject_public_key: 'subject-key',
+    origin: 'https://work.zenith-research.ca', profile_schema: profile.schema,
+    now: () => new Date('2026-10-01T00:01:00.000Z'),
+  }
+  for (const patch of [{ profile: null }, { nonce: 1 }, { request_id: '   ' }, { wallet_signature: {} }]) {
+    assert.throws(() => assertCredentialRequestBinding(
+      { ...credentialRequest(), ...patch } as unknown as CastaliaCredentialRequestV1, expected,
+    ), /invalid_request/)
+  }
+  assert.throws(() => assertCredentialRequestBinding(credentialRequest(), {
+    ...expected, now: () => new Date(Number.NaN),
+  }), /invalid_request/)
+})
