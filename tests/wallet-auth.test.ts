@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  assertCredentialRequestBinding,
   authenticateWithCastaliaWallet,
   createWalletAuthChallenge,
+  requestCredentialWithCastaliaWallet,
+  resolveCredentialProfile,
+  UnsupportedCredentialProfileError,
+  useCredentialWithCastaliaWallet,
+  type CastaliaCredentialProfile,
+  type CastaliaCredentialProfileAdapter,
+  type CastaliaCredentialProvider,
+  type CastaliaCredentialRequestV1,
   verifyWalletPresentation,
   type CastaliaWalletProvider,
 } from '../src/index.ts'
@@ -152,3 +161,205 @@ test('authenticateWithCastaliaWallet fails closed when provider is unavailable',
   }), /not available/)
 })
 
+const profile: CastaliaCredentialProfile & {
+  schema: 'devgraph.credential-request-profile.v1'
+} = {
+  schema: 'devgraph.credential-request-profile.v1',
+  issuer: 'devgraph-owner-local-v1',
+  audience: 'devgraph',
+  resource: 'https://work.zenith-research.ca/devgraph',
+  requested_scopes: ['devgraph.work.read'],
+  requested_grants: [{ scope: 'devgraph.work.read' }],
+  reason: 'Read delegated Devgraph Work data',
+}
+
+const adapter: CastaliaCredentialProfileAdapter<typeof profile> = {
+  schema: profile.schema,
+  validate(value) {
+    if (value.schema !== profile.schema || value.audience !== 'devgraph') {
+      throw new Error('invalid Devgraph profile')
+    }
+    return value as typeof profile
+  },
+}
+
+function credentialRequest(): CastaliaCredentialRequestV1 {
+  return {
+    schema: 'castalia.credential-request.v1',
+    schema_version: 1,
+    request_id: 'crq-test',
+    namespace: 'zenith:devgraph',
+    subject_public_key: 'subject-key',
+    origin: 'https://work.zenith-research.ca',
+    profile,
+    requested_at: '2026-10-01T00:00:00.000Z',
+    request_expires_at: '2026-10-01T00:05:00.000Z',
+    nonce: 'nonce',
+    wallet_signature: 'signature',
+  }
+}
+
+test('profile dispatch is explicit and unknown profiles fail closed', () => {
+  assert.equal(resolveCredentialProfile(profile, [adapter]), profile)
+  assert.throws(
+    () => resolveCredentialProfile({ schema: 'unknown.profile.v1' }, [adapter]),
+    (error) => error instanceof UnsupportedCredentialProfileError && error.code === 'unsupported_profile',
+  )
+})
+
+test('credential request binding covers subject, trusted origin, namespace, profile, and expiry', () => {
+  const request = credentialRequest()
+  const expected = {
+    namespace: 'zenith:devgraph',
+    subject_public_key: 'subject-key',
+    origin: 'https://work.zenith-research.ca',
+    profile_schema: profile.schema,
+    now: () => new Date('2026-10-01T00:01:00.000Z'),
+  }
+  assert.doesNotThrow(() => assertCredentialRequestBinding(request, expected))
+  assert.throws(
+    () => assertCredentialRequestBinding({ ...request, origin: 'https://evil.example' }, expected),
+    /request_binding_mismatch/,
+  )
+  assert.throws(
+    () => assertCredentialRequestBinding(request, {
+      ...expected,
+      now: () => new Date('2026-10-01T00:05:00.000Z'),
+    }),
+    /credential_request_expired/,
+  )
+})
+
+test('credential provider methods are additive and approved use requires bounded authority', async () => {
+  const provider: CastaliaCredentialProvider = {
+    async isAvailable() { return true },
+    async getSubject() {
+      return { subjectId: 'subject-1', publicKey: 'subject-key', walletKind: 'castalia-dregg' }
+    },
+    async signChallenge() { throw new Error('not used') },
+    async requestCredential(input) {
+      assert.equal(input.namespace, 'zenith:devgraph')
+      return credentialRequest()
+    },
+    async installCredential(input) {
+      return {
+        schema: 'castalia.credential-install-result.v1',
+        schema_version: 1,
+        state: 'installed',
+        namespace: input.namespace,
+      }
+    },
+    async useCredential(input) {
+      assert.equal(input.path, '/devgraph/work/Issue')
+      return {
+        schema: 'castalia.credential-use-result.v1',
+        schema_version: 1,
+        state: 'approved',
+        credential: 'memory-only-test-authority',
+        expires_at: '2026-10-01T00:05:00.000Z',
+      }
+    },
+  }
+  const requested = await requestCredentialWithCastaliaWallet({
+    provider,
+    namespace: 'zenith:devgraph',
+    profile,
+    request_expires_at: '2026-10-01T00:05:00.000Z',
+    nonce: 'nonce',
+  })
+  assert.equal(requested.request_id, 'crq-test')
+
+  const used = await useCredentialWithCastaliaWallet({
+    provider,
+    request: {
+      schema: 'castalia.credential-use.v1',
+      schema_version: 1,
+      namespace: 'zenith:devgraph',
+      audience: 'devgraph',
+      resource: 'https://work.zenith-research.ca/devgraph',
+      method: 'GET',
+      path: '/devgraph/work/Issue',
+      required_scopes: ['devgraph.work.read'],
+      reason: 'List visible issues',
+    },
+  })
+  assert.equal(used.state, 'approved')
+})
+
+test('credential use rejects secret material on denied results', async () => {
+  const provider = {
+    async isAvailable() { return true },
+    async useCredential() {
+      return {
+        schema: 'castalia.credential-use-result.v1' as const,
+        schema_version: 1 as const,
+        state: 'denied' as const,
+        credential: 'must-not-leak',
+      }
+    },
+  } as Pick<CastaliaCredentialProvider, 'isAvailable' | 'useCredential'>
+
+  await assert.rejects(
+    () => useCredentialWithCastaliaWallet({
+      provider: provider as CastaliaCredentialProvider,
+      request: {
+        schema: 'castalia.credential-use.v1',
+        schema_version: 1,
+        namespace: 'zenith:devgraph',
+        audience: 'devgraph',
+        resource: 'https://work.zenith-research.ca/devgraph',
+        method: 'GET',
+        path: '/devgraph/graph',
+        required_scopes: ['devgraph.graph.read'],
+        reason: 'Read graph',
+      },
+    }),
+    /invalid_credential_use_result/,
+  )
+})
+
+
+test('credential use rejects malformed or unsupported provider results', async () => {
+  const approved = {
+    schema: 'castalia.credential-use-result.v1', schema_version: 1,
+    state: 'approved', credential: 'synthetic-test-authority',
+    expires_at: '2026-10-01T00:05:00.000Z',
+  }
+  const invalid = [
+    null, { ...approved, schema: 'future.result.v2' },
+    { ...approved, schema_version: 2 }, { ...approved, state: 'unknown', credential: undefined },
+    { ...approved, expires_at: 'invalid' }, { ...approved, credential: 42 },
+    { ...approved, credential: '   ' },
+  ]
+  for (const result of invalid) {
+    const provider = {
+      async isAvailable() { return true },
+      async useCredential() { return result },
+    } as unknown as CastaliaCredentialProvider
+    await assert.rejects(() => useCredentialWithCastaliaWallet({
+      provider,
+      request: {
+        schema: 'castalia.credential-use.v1', schema_version: 1,
+        namespace: 'zenith:devgraph', audience: 'devgraph',
+        resource: 'https://work.zenith-research.ca/devgraph', method: 'GET',
+        path: '/devgraph/graph', required_scopes: ['devgraph.graph.read'], reason: 'Read graph',
+      },
+    }), /invalid_credential_use_result/)
+  }
+})
+
+test('credential request binding rejects malformed fields and invalid clocks', () => {
+  const expected = {
+    namespace: 'zenith:devgraph', subject_public_key: 'subject-key',
+    origin: 'https://work.zenith-research.ca', profile_schema: profile.schema,
+    now: () => new Date('2026-10-01T00:01:00.000Z'),
+  }
+  for (const patch of [{ profile: null }, { nonce: 1 }, { request_id: '   ' }, { wallet_signature: {} }]) {
+    assert.throws(() => assertCredentialRequestBinding(
+      { ...credentialRequest(), ...patch } as unknown as CastaliaCredentialRequestV1, expected,
+    ), /invalid_request/)
+  }
+  assert.throws(() => assertCredentialRequestBinding(credentialRequest(), {
+    ...expected, now: () => new Date(Number.NaN),
+  }), /invalid_request/)
+})
