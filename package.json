@@ -15,7 +15,9 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "docs/credential-presentation-v2.md",
+    "fixtures/credential-presentation-v2.json"
   ],
   "sideEffects": false,
   "scripts": {

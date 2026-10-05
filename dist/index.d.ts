@@ -155,3 +155,4 @@ export type AuthenticateWithCastaliaWalletInput = {
 export declare function createWalletAuthChallenge(input: CreateWalletAuthChallengeInput): CastaliaWalletChallenge;
 export declare function authenticateWithCastaliaWallet(input: AuthenticateWithCastaliaWalletInput): Promise<VerifiedWalletPresentation>;
 export declare function verifyWalletPresentation(input: VerifyWalletPresentationInput): VerifiedWalletPresentation;
+export * from './presentation.js';
