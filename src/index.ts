@@ -361,3 +361,5 @@ function assertChallengeMatches(actual: CastaliaWalletChallenge, expected: Casta
     }
   }
 }
+
+export * from './presentation.js'
