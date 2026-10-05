@@ -57,7 +57,10 @@ export function canonicalPresentationJson(value: unknown): string {
   if (value === null || typeof value === 'boolean') return JSON.stringify(value)
   if (typeof value === 'string') { scalarString(value); return JSON.stringify(value) }
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value)
-  if (Array.isArray(value)) return '[' + value.map(canonicalPresentationJson).join(',') + ']'
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) if (!Object.hasOwn(value, i)) throw new Error('sparse_array')
+    return '[' + value.map(canonicalPresentationJson).join(',') + ']'
+  }
   if (typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype) {
     return '{' + Object.keys(value).sort().map(key => {
       if (!/^[a-z][a-z0-9_]*$/.test(key)) throw new Error('invalid_field_name')
@@ -104,7 +107,7 @@ export function assertPresentationRequest(value: unknown, now: number): asserts 
   shape(value.disclosure, ['title','statements']); text(value.disclosure.title, 160)
   const statements = value.disclosure.statements
   if (!Array.isArray(statements) || statements.length < 1 || statements.length > PRESENTATION_LIMITS.statements) throw new Error('invalid_disclosure')
-  statements.forEach(statement => text(statement, PRESENTATION_LIMITS.statementBytes))
+  for (const statement of statements) text(statement, PRESENTATION_LIMITS.statementBytes)
   shape(value.credential, ['claims','signature']); hex(value.credential.signature, 64)
   const c = value.credential.claims; shape(c, CLAIM_KEYS)
   if (c.schema !== 'castalia.request-credential.v1') throw new Error('unsupported_credential')
@@ -125,5 +128,23 @@ export function credentialTranscript(claims: RequestCredentialClaims): string { 
 export function presentationTranscript(presentation: CredentialPresentationV2): string { const { signature: _signature, ...unsigned } = presentation; return PRESENTATION_SIGNATURE_DOMAIN + canonicalPresentationJson(unsigned) }
 export async function presentCredentialWithWallet(provider: CredentialPresentationProvider, request: CredentialPresentationRequestV2): Promise<CredentialPresentationResultV2> {
   if (!(await provider.getCapabilities()).includes(PRESENTATION_CAPABILITY)) return { state: 'unavailable', reason: 'unsupported_version' }
-  return provider.presentCredential(request)
+  const now = Math.floor(Date.now() / 1000)
+  assertPresentationRequest(request, now)
+  const result: unknown = await provider.presentCredential(request)
+  if (!result || typeof result !== 'object' || !('state' in result)) throw new Error('invalid_provider_result')
+  const fields = result as Record<string, unknown>
+  if (fields.state === 'approved') {
+    shape(fields, ['state', 'presentation'])
+    assertCredentialPresentation(fields.presentation, Math.floor(Date.now() / 1000))
+    const p = fields.presentation, c = request.credential.claims
+    for (const key of ['holder_public_key','issuer','key_id','audience','request_digest_sha256','disclosure_digest_sha256'] as const) {
+      if (p[key] !== c[key]) throw new Error('presentation_binding_mismatch')
+    }
+    if (canonicalPresentationJson(p.caller) !== canonicalPresentationJson(c.caller) || p.issued_at < c.issued_at || p.expires_at > c.expires_at) throw new Error('presentation_binding_mismatch')
+    return {state:'approved',presentation:p}
+  }
+  shape(fields, ['state','reason'])
+  if (fields.state !== 'denied' && fields.state !== 'unavailable') throw new Error('invalid_provider_result')
+  text(fields.reason, 200, true)
+  return {state:fields.state,reason:fields.reason}
 }

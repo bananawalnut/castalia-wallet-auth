@@ -13,8 +13,12 @@ export function canonicalPresentationJson(value) {
     }
     if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
         return String(value);
-    if (Array.isArray(value))
+    if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++)
+            if (!Object.hasOwn(value, i))
+                throw new Error('sparse_array');
         return '[' + value.map(canonicalPresentationJson).join(',') + ']';
+    }
     if (typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype) {
         return '{' + Object.keys(value).sort().map(key => {
             if (!/^[a-z][a-z0-9_]*$/.test(key))
@@ -82,7 +86,8 @@ export function assertPresentationRequest(value, now) {
     const statements = value.disclosure.statements;
     if (!Array.isArray(statements) || statements.length < 1 || statements.length > PRESENTATION_LIMITS.statements)
         throw new Error('invalid_disclosure');
-    statements.forEach(statement => text(statement, PRESENTATION_LIMITS.statementBytes));
+    for (const statement of statements)
+        text(statement, PRESENTATION_LIMITS.statementBytes);
     shape(value.credential, ['claims', 'signature']);
     hex(value.credential.signature, 64);
     const c = value.credential.claims;
@@ -118,5 +123,27 @@ export function presentationTranscript(presentation) { const { signature: _signa
 export async function presentCredentialWithWallet(provider, request) {
     if (!(await provider.getCapabilities()).includes(PRESENTATION_CAPABILITY))
         return { state: 'unavailable', reason: 'unsupported_version' };
-    return provider.presentCredential(request);
+    const now = Math.floor(Date.now() / 1000);
+    assertPresentationRequest(request, now);
+    const result = await provider.presentCredential(request);
+    if (!result || typeof result !== 'object' || !('state' in result))
+        throw new Error('invalid_provider_result');
+    const fields = result;
+    if (fields.state === 'approved') {
+        shape(fields, ['state', 'presentation']);
+        assertCredentialPresentation(fields.presentation, Math.floor(Date.now() / 1000));
+        const p = fields.presentation, c = request.credential.claims;
+        for (const key of ['holder_public_key', 'issuer', 'key_id', 'audience', 'request_digest_sha256', 'disclosure_digest_sha256']) {
+            if (p[key] !== c[key])
+                throw new Error('presentation_binding_mismatch');
+        }
+        if (canonicalPresentationJson(p.caller) !== canonicalPresentationJson(c.caller) || p.issued_at < c.issued_at || p.expires_at > c.expires_at)
+            throw new Error('presentation_binding_mismatch');
+        return { state: 'approved', presentation: p };
+    }
+    shape(fields, ['state', 'reason']);
+    if (fields.state !== 'denied' && fields.state !== 'unavailable')
+        throw new Error('invalid_provider_result');
+    text(fields.reason, 200, true);
+    return { state: fields.state, reason: fields.reason };
 }

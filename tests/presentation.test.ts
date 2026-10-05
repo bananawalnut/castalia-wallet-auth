@@ -25,3 +25,10 @@ test('Rust vector canonical bytes and both signatures match independently',()=>{
  assert.equal(hash(v.request.credential),v.expected_presentation.credential_digest_sha256)
  assert.equal(hash(v.request.disclosure),v.expected_presentation.disclosure_digest_sha256)
 })
+
+test('sparse arrays and undeclared denial payloads fail structural validation',async()=>{
+ const r=request();r.disclosure.statements=new Array(1);assert.throws(()=>assertPresentationRequest(r,110));assert.throws(()=>canonicalPresentationJson(new Array(1)))
+ const fresh=request();fresh.credential.claims.issued_at=Math.floor(Date.now()/1000);fresh.credential.claims.expires_at=fresh.credential.claims.issued_at+120
+ await assert.rejects(presentCredentialWithWallet({getCapabilities:async()=>['credential_presentation_v2'],presentCredential:async()=>({state:'denied',reason:'denied',credential:'unexpected'} as any)},fresh),/invalid_shape/)
+ await assert.rejects(presentCredentialWithWallet({getCapabilities:async()=>['credential_presentation_v2'],presentCredential:async()=>({state:'approved',presentation:{}} as any)},fresh),/invalid_shape/)
+})
