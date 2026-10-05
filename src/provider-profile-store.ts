@@ -1,5 +1,5 @@
 import { parseProviderProfile, profileOrigin, providerProfileBytes, PROFILE_LIMITS, type ProviderProfileV1, type MembershipRootV1 } from './provider-profiles.js'
-import type { PresentationTrustPin } from './presentation.js'
+import { canonicalPresentationJson, type PresentationTrustPin } from './presentation.js'
 
 export type StoredProviderProfile = { id: string; revision: number; active: boolean; profile: ProviderProfileV1 }
 type CredentialRecord = { profileId: string; holder: string; digest: string; credential: any }
@@ -89,7 +89,7 @@ export function createProviderProfileStore(deps:Dependencies) {
     async saveCredential(profileId:string,expectedRevision:number,input:unknown,holder:string){return mutate(async state=>{
       const p=selected(state,profileId);if(p.revision!==expectedRevision||!p.profile.membership)throw new Error('stale_profile_revision')
       const credential=await deps.verifyMembership(input,p.profile.membership.roots,holder)
-      const digest=await deps.digest(JSON.stringify(credential))
+      const digest=await deps.digest(canonicalPresentationJson(credential))
       if(!state.credentials.some(c=>c.profileId===profileId&&c.holder===holder&&c.digest===digest)){
         if(state.credentials.length>=PROFILE_LIMITS.credentials)throw new Error('credential_capacity')
         state.credentials.push({profileId,holder,digest,credential})
@@ -100,7 +100,7 @@ export function createProviderProfileStore(deps:Dependencies) {
       const state=await read(),p=selected(state,profileId,origin)
       if(!p.profile.membership)throw new Error('membership_unavailable')
       for(const c of state.credentials.filter(c=>c.profileId===profileId&&c.holder===holder).reverse()) {
-        if(c.digest!==await deps.digest(JSON.stringify(c.credential)))throw new Error('stored_credential_digest_mismatch')
+        if(c.digest!==await deps.digest(canonicalPresentationJson(c.credential)))throw new Error('stored_credential_digest_mismatch')
         try{return await deps.verifyMembership(c.credential,p.profile.membership.roots,holder)}catch{/* A removed root cannot establish current trust. */}
       }
       if(legacy!==undefined&&legacy!==null)return deps.verifyMembership(legacy,p.profile.membership.roots,holder)

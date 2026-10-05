@@ -1,4 +1,5 @@
 import { parseProviderProfile, profileOrigin, providerProfileBytes, PROFILE_LIMITS } from './provider-profiles.js';
+import { canonicalPresentationJson } from './presentation.js';
 const clone = (v) => JSON.parse(JSON.stringify(v));
 function revision(v) { if (!Number.isSafeInteger(v) || v < 0)
     throw new Error('invalid_profile_revision'); }
@@ -140,7 +141,7 @@ export function createProviderProfileStore(deps) {
                 if (p.revision !== expectedRevision || !p.profile.membership)
                     throw new Error('stale_profile_revision');
                 const credential = await deps.verifyMembership(input, p.profile.membership.roots, holder);
-                const digest = await deps.digest(JSON.stringify(credential));
+                const digest = await deps.digest(canonicalPresentationJson(credential));
                 if (!state.credentials.some(c => c.profileId === profileId && c.holder === holder && c.digest === digest)) {
                     if (state.credentials.length >= PROFILE_LIMITS.credentials)
                         throw new Error('credential_capacity');
@@ -154,7 +155,7 @@ export function createProviderProfileStore(deps) {
             if (!p.profile.membership)
                 throw new Error('membership_unavailable');
             for (const c of state.credentials.filter(c => c.profileId === profileId && c.holder === holder).reverse()) {
-                if (c.digest !== await deps.digest(JSON.stringify(c.credential)))
+                if (c.digest !== await deps.digest(canonicalPresentationJson(c.credential)))
                     throw new Error('stored_credential_digest_mismatch');
                 try {
                     return await deps.verifyMembership(c.credential, p.profile.membership.roots, holder);

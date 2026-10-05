@@ -32,3 +32,13 @@ test('unknown persisted schema fails closed; identity replacement clears cached 
  f.data=undefined;const a=await f.store.approve(profile());await f.store.bindLegacy('https://a.example',a.id,a.revision)
  await f.store.clearIdentity();assert.equal((await f.store.list('https://a.example')).length,1);await assert.rejects(f.store.legacy('https://a.example'))
 })
+
+test('credential digest survives Chrome storage property reordering but rejects changed bytes',async()=>{
+ const f=fixture(),p=await f.store.approve(profile()),owner='11'.repeat(32)
+ const credential={schema:'castalia.zenith-membership-credential.v3',ownerPublicKey:owner,membershipId:'22'.repeat(32),issuerId:'alpha',issuerKeyId:'key'}
+ await f.store.saveCredential(p.id,p.revision,credential,owner)
+ f.data.credentials[0].credential=Object.fromEntries(Object.entries(credential).reverse())
+ assert.deepEqual(await f.store.credential(p.id,'https://a.example',owner),credential)
+ f.data.credentials[0].credential.membershipId='33'.repeat(32)
+ await assert.rejects(f.store.credential(p.id,'https://a.example',owner),/digest_mismatch/)
+})
