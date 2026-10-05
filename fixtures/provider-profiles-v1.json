@@ -1,0 +1,20 @@
+{
+  "schema": "castalia.provider-profile.v1",
+  "display_name": "Independent fixture provider",
+  "origins": [
+    "https://app.example"
+  ],
+  "membership": {
+    "protocol": "castalia.zenith-membership.v3",
+    "issuer_origin": "https://issuer.example",
+    "roots": [
+      {
+        "issuerId": "independent-fixture",
+        "keyId": "fixture-key-1",
+        "signatureSuite": "Ed25519",
+        "publicKey": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    ]
+  },
+  "presentations": []
+}

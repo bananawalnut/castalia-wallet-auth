@@ -17,7 +17,9 @@
     "dist",
     "README.md",
     "docs/credential-presentation-v2.md",
-    "fixtures/credential-presentation-v2.json"
+    "fixtures/credential-presentation-v2.json",
+    "docs/provider-profiles-v1.md",
+    "fixtures/provider-profiles-v1.json"
   ],
   "sideEffects": false,
   "scripts": {

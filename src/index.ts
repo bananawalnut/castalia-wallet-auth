@@ -363,3 +363,6 @@ function assertChallengeMatches(actual: CastaliaWalletChallenge, expected: Casta
 }
 
 export * from './presentation.js'
+
+export * from './provider-profiles.js'
+export * from './provider-profile-store.js'

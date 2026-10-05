@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Bounded runtime provider profiles and a multi-issuer membership catalog — keep connection, trust purposes and receiving-service eligibility separate without changing signed bytes or recovery.
+
 - Generic credential-bound presentation v2 types and fixed transcript helpers — let applications own their operations while Wallet verifies and approves each request.
 
 - Add pinned, read-only pull-request CI — require contract, type and distribution checks before accepting profile-contract changes.

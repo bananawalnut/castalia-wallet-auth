@@ -161,3 +161,5 @@ function assertChallengeMatches(actual, expected) {
     }
 }
 export * from './presentation.js';
+export * from './provider-profiles.js';
+export * from './provider-profile-store.js';

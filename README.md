@@ -37,3 +37,7 @@ Credential helpers validate the generic envelope and dispatch profile validation
 ## Credential-bound presentation v2
 
 `CredentialPresentationProvider` advertises `credential_presentation_v2` and accepts an attached issuer credential with an opaque exact request and signed disclosure. Approval is per use. The wallet signs a fixed generic transcript; applications retain request semantics and execution. See [the versioned contract](docs/credential-presentation-v2.md). Structural helpers are not cryptographic verification or authorization.
+
+## Runtime provider trust
+
+Provider profiles, independent trust purposes, neutral connection and membership APIs are defined in [Runtime provider profiles v1](docs/provider-profiles-v1.md). Fresh installations have no pretrusted provider. Registry eligibility remains receiver policy.
