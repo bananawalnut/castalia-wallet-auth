@@ -1,5 +1,4 @@
 import { parseProviderProfile, profileOrigin, providerProfileBytes, PROFILE_LIMITS } from './provider-profiles.js';
-import { canonicalPresentationJson } from './presentation.js';
 const clone = (v) => JSON.parse(JSON.stringify(v));
 function revision(v) { if (!Number.isSafeInteger(v) || v < 0)
     throw new Error('invalid_profile_revision'); }
@@ -8,6 +7,13 @@ function id(v) { if (typeof v !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(v))
 function exact(v, keys) {
     if (!v || typeof v !== 'object' || Array.isArray(v) || Object.getPrototypeOf(v) !== Object.prototype || Object.keys(v).sort().join(',') !== keys.sort().join(','))
         throw new Error('invalid_provider_state');
+}
+// Existing v3 membership is a closed flat object. Canonicalize catalog bytes,
+// without using the distinct snake_case-only generic signing canonicalizer.
+function catalogBytes(credential) {
+    if (Object.values(credential).some(v => typeof v !== 'string' && !(typeof v === 'number' && Number.isSafeInteger(v))))
+        throw new Error('invalid_stored_credential');
+    return JSON.stringify(credential, Object.keys(credential).sort());
 }
 function empty() { return { schema: 'castalia.wallet-provider-state.v1', revision: 0, profiles: [], legacy: {}, credentials: [] }; }
 function parse(value) {
@@ -141,7 +147,7 @@ export function createProviderProfileStore(deps) {
                 if (p.revision !== expectedRevision || !p.profile.membership)
                     throw new Error('stale_profile_revision');
                 const credential = await deps.verifyMembership(input, p.profile.membership.roots, holder);
-                const digest = await deps.digest(canonicalPresentationJson(credential));
+                const digest = await deps.digest(catalogBytes(credential));
                 if (!state.credentials.some(c => c.profileId === profileId && c.holder === holder && c.digest === digest)) {
                     if (state.credentials.length >= PROFILE_LIMITS.credentials)
                         throw new Error('credential_capacity');
@@ -155,7 +161,7 @@ export function createProviderProfileStore(deps) {
             if (!p.profile.membership)
                 throw new Error('membership_unavailable');
             for (const c of state.credentials.filter(c => c.profileId === profileId && c.holder === holder).reverse()) {
-                if (c.digest !== await deps.digest(canonicalPresentationJson(c.credential)))
+                if (c.digest !== await deps.digest(catalogBytes(c.credential)))
                     throw new Error('stored_credential_digest_mismatch');
                 try {
                     return await deps.verifyMembership(c.credential, p.profile.membership.roots, holder);

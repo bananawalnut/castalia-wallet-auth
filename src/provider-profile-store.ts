@@ -1,5 +1,5 @@
 import { parseProviderProfile, profileOrigin, providerProfileBytes, PROFILE_LIMITS, type ProviderProfileV1, type MembershipRootV1 } from './provider-profiles.js'
-import { canonicalPresentationJson, type PresentationTrustPin } from './presentation.js'
+import type { PresentationTrustPin } from './presentation.js'
 
 export type StoredProviderProfile = { id: string; revision: number; active: boolean; profile: ProviderProfileV1 }
 type CredentialRecord = { profileId: string; holder: string; digest: string; credential: any }
@@ -13,6 +13,12 @@ function revision(v:unknown): asserts v is number { if(!Number.isSafeInteger(v)|
 function id(v:unknown): asserts v is string { if(typeof v!=='string'||!/^[a-zA-Z0-9-]{1,100}$/.test(v)) throw new Error('invalid_profile_id') }
 function exact(v:unknown, keys:string[]): asserts v is Record<string,any> {
   if(!v||typeof v!=='object'||Array.isArray(v)||Object.getPrototypeOf(v)!==Object.prototype||Object.keys(v).sort().join(',')!==keys.sort().join(',')) throw new Error('invalid_provider_state')
+}
+// Existing v3 membership is a closed flat object. Canonicalize catalog bytes,
+// without using the distinct snake_case-only generic signing canonicalizer.
+function catalogBytes(credential: Record<string,unknown>): string {
+  if(Object.values(credential).some(v=>typeof v!=='string'&&!(typeof v==='number'&&Number.isSafeInteger(v))))throw new Error('invalid_stored_credential')
+  return JSON.stringify(credential,Object.keys(credential).sort())
 }
 function empty():ProfileState { return {schema:'castalia.wallet-provider-state.v1',revision:0,profiles:[],legacy:{},credentials:[]} }
 function parse(value:unknown):ProfileState {
@@ -89,7 +95,7 @@ export function createProviderProfileStore(deps:Dependencies) {
     async saveCredential(profileId:string,expectedRevision:number,input:unknown,holder:string){return mutate(async state=>{
       const p=selected(state,profileId);if(p.revision!==expectedRevision||!p.profile.membership)throw new Error('stale_profile_revision')
       const credential=await deps.verifyMembership(input,p.profile.membership.roots,holder)
-      const digest=await deps.digest(canonicalPresentationJson(credential))
+      const digest=await deps.digest(catalogBytes(credential))
       if(!state.credentials.some(c=>c.profileId===profileId&&c.holder===holder&&c.digest===digest)){
         if(state.credentials.length>=PROFILE_LIMITS.credentials)throw new Error('credential_capacity')
         state.credentials.push({profileId,holder,digest,credential})
@@ -100,7 +106,7 @@ export function createProviderProfileStore(deps:Dependencies) {
       const state=await read(),p=selected(state,profileId,origin)
       if(!p.profile.membership)throw new Error('membership_unavailable')
       for(const c of state.credentials.filter(c=>c.profileId===profileId&&c.holder===holder).reverse()) {
-        if(c.digest!==await deps.digest(canonicalPresentationJson(c.credential)))throw new Error('stored_credential_digest_mismatch')
+        if(c.digest!==await deps.digest(catalogBytes(c.credential)))throw new Error('stored_credential_digest_mismatch')
         try{return await deps.verifyMembership(c.credential,p.profile.membership.roots,holder)}catch{/* A removed root cannot establish current trust. */}
       }
       if(legacy!==undefined&&legacy!==null)return deps.verifyMembership(legacy,p.profile.membership.roots,holder)
