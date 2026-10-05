@@ -156,3 +156,5 @@ export declare function createWalletAuthChallenge(input: CreateWalletAuthChallen
 export declare function authenticateWithCastaliaWallet(input: AuthenticateWithCastaliaWalletInput): Promise<VerifiedWalletPresentation>;
 export declare function verifyWalletPresentation(input: VerifyWalletPresentationInput): VerifiedWalletPresentation;
 export * from './presentation.js';
+export * from './provider-profiles.js';
+export * from './provider-profile-store.js';
