@@ -18,5 +18,6 @@ All notable changes to this project will be documented in this file.
 - Provider contract, challenge creation, signature-presentation verification, and tests.
 
 ### Fixed
+- Build Auth into an empty staging tree and compare the complete generated distribution — committed obsolete modules must fail CI and cannot survive prepack.
 - Reject sparse canonical arrays and malformed provider results — prevent structural validation from admitting data that the custody contract rejects.
 - Reject malformed credential requests and provider responses — prevent unsupported versions, invalid expiry values and unknown states from being accepted as authority.

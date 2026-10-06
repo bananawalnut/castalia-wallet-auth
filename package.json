@@ -23,10 +23,11 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsc --project tsconfig.build.json",
+    "build": "node scripts/build-distribution.mjs",
     "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "build:check": "node scripts/build-distribution.mjs --check"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

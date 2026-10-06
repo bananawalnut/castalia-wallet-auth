@@ -20,6 +20,7 @@ npm ci --ignore-scripts --no-audit --no-fund
 node --test tests/ci-contract.test.mjs
 npm test
 npm run typecheck
+npm run build:check
 npm run build
 node scripts/check-ci.mjs dist
 node scripts/check-ci.mjs fixtures
