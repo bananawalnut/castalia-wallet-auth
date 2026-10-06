@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Add exact-head Buildkite package qualification — verify fixed fixtures, generated output and isolated packed exports without changing required GitHub checks.
+
 - Bounded runtime provider profiles and a multi-issuer membership catalog — keep connection, trust purposes and receiving-service eligibility separate without changing signed bytes or recovery.
 
 - Generic credential-bound presentation v2 types and fixed transcript helpers — let applications own their operations while Wallet verifies and approves each request.

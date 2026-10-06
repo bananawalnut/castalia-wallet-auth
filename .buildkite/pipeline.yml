@@ -1,0 +1,9 @@
+steps:
+  - label: "Auth contracts, fixtures and packed distribution"
+    key: auth-contracts
+    command: bash .buildkite/verify.sh
+    agents:
+      queue: linux-small
+    timeout_in_minutes: 15
+    artifact_paths:
+      - ".ci-output/**/*"
